@@ -172,7 +172,7 @@ if "channel" in st.session_state and "all_videos" in st.session_state:
         st.subheader("Your copy-and-paste prompt")
         st.info(
             "This prompt requests a full chapter for every video, so the result may be extremely long. "
-            "Use ChatGPT's Deep research mode when available and review the final completeness ledger."
+            "Use ChatGPT's Deep research mode when available and confirm that every numbered video was completed."
         )
         st.code(prompt, language=None, line_numbers=False)
 
