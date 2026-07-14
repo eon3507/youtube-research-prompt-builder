@@ -20,7 +20,7 @@ It does **not** call Gemini, OpenAI, or any other language-model API. It uses Yo
 
 The prompt asks ChatGPT to process the videos one by one in a strict repeating sequence: **Video → Key takeaways → Best nuggets → Best quotes**, followed immediately by the next video. It prohibits Instagram, blogs, summaries, and other external sources. Video-specific claims and quotes must come only from the timestamped transcript pack.
 
-For public deployments, the app accepts direct channel URLs, `@handles`, usernames, and channel IDs instead of free-text channel-name searches. Metadata scans are cached for six hours, transcripts for 24 hours, and each browser session is rate limited. If a selected video has no accessible transcript, the app checks later videos in the chosen order until it reaches the requested count or its safety limit.
+For public deployments, the app accepts direct channel URLs, `@handles`, usernames, and channel IDs instead of free-text channel-name searches. Metadata scans and compact transcript text are cached for six hours, and each browser session is rate limited. If a selected video has no accessible transcript, the app checks later videos in the chosen order until it reaches the requested count or its safety limit.
 
 ## Why use the YouTube API instead of a cheap LLM?
 

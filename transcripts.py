@@ -15,12 +15,13 @@ class TranscriptResult:
     status: str
     language: str | None
     source: str | None
-    segments: tuple[dict, ...]
+    timestamped_text: str
+    segment_count: int = 0
     reason: str | None = None
 
     @property
     def available(self) -> bool:
-        return self.status == "available" and bool(self.segments)
+        return self.status == "available" and bool(self.timestamped_text.strip())
 
     @property
     def source_label(self) -> str:
@@ -64,6 +65,13 @@ def normalize_segments(raw_segments: Iterable[object]) -> tuple[dict, ...]:
     return tuple(segments)
 
 
+def segments_to_timestamped_text(segments: Iterable[dict]) -> str:
+    return "\n".join(
+        f"[{format_timestamp(segment['start'])}] {segment['text']}"
+        for segment in segments
+    )
+
+
 def fetch_transcript(video_id: str, languages: Iterable[str]) -> TranscriptResult:
     """Fetch the best public YouTube transcript without translating its wording."""
 
@@ -104,21 +112,28 @@ def fetch_transcript(video_id: str, languages: Iterable[str]) -> TranscriptResul
                 break
 
         if transcript is None:
-            return TranscriptResult(video_id, "unavailable", None, None, (), "No transcript found")
+            return TranscriptResult(
+                video_id, "unavailable", None, None, "", reason="No transcript found"
+            )
 
         fetched = transcript.fetch()
         if hasattr(fetched, "to_raw_data"):
             fetched = fetched.to_raw_data()
         segments = normalize_segments(fetched)
         if not segments:
-            return TranscriptResult(video_id, "unavailable", None, None, (), "Transcript was empty")
+            return TranscriptResult(
+                video_id, "unavailable", None, None, "", reason="Transcript was empty"
+            )
+
+        timestamped_text = segments_to_timestamped_text(segments)
 
         return TranscriptResult(
             video_id=video_id,
             status="available",
             language=getattr(transcript, "language_code", None),
             source=source,
-            segments=segments,
+            timestamped_text=timestamped_text,
+            segment_count=len(segments),
         )
     except Exception as exc:  # YouTube exposes several changing transcript error classes.
         error_name = type(exc).__name__
@@ -136,7 +151,7 @@ def fetch_transcript(video_id: str, languages: Iterable[str]) -> TranscriptResul
             status="unavailable",
             language=None,
             source=None,
-            segments=(),
+            timestamped_text="",
             reason=friendly_reasons.get(error_name, f"Transcript retrieval failed ({error_name})"),
         )
 
@@ -175,9 +190,6 @@ def build_transcript_pack(videos: list, transcripts: dict[str, TranscriptResult]
                 "",
             ]
         )
-        blocks.extend(
-            f"[{format_timestamp(segment['start'])}] {segment['text']}"
-            for segment in transcript.segments
-        )
+        blocks.append(transcript.timestamped_text)
         blocks.extend(["", "---", ""])
     return "\n".join(blocks).rstrip() + "\n"

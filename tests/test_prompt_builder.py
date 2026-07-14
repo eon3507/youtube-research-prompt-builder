@@ -1,7 +1,13 @@
 import pytest
 
 from prompt_builder import PromptOptions, build_prompt
-from transcripts import TranscriptResult, build_transcript_pack, format_timestamp, normalize_segments
+from transcripts import (
+    TranscriptResult,
+    build_transcript_pack,
+    format_timestamp,
+    normalize_segments,
+    segments_to_timestamped_text,
+)
 from youtube_api import Video
 
 
@@ -16,14 +22,16 @@ def test_prompt_contains_every_video_and_safety_rules() -> None:
             "available",
             "en",
             "youtube-manual",
-            ({"text": "First exact line", "start": 5.0, "duration": 2.0},),
+            "[00:05] First exact line",
+            1,
         ),
         "lmnopqrstuv": TranscriptResult(
             "lmnopqrstuv",
             "available",
             "en",
             "youtube-auto",
-            ({"text": "Second exact line", "start": 65.0, "duration": 3.0},),
+            "[01:05] Second exact line",
+            1,
         ),
     }
     prompt = build_prompt(
@@ -61,12 +69,14 @@ def test_transcript_pack_preserves_source_text_and_timestamps() -> None:
     videos = [
         Video("abcdefghijk", "First video", "https://youtube.com/watch?v=abcdefghijk", "", 42, 605)
     ]
+    segments = normalize_segments([{"text": "A &amp; B", "start": 65.4, "duration": 2}])
     transcript = TranscriptResult(
         "abcdefghijk",
         "available",
         "en",
         "youtube-manual",
-        normalize_segments([{"text": "A &amp; B", "start": 65.4, "duration": 2}]),
+        segments_to_timestamped_text(segments),
+        len(segments),
     )
     pack = build_transcript_pack(videos, {"abcdefghijk": transcript})
     assert "YouTube human-created captions" in pack

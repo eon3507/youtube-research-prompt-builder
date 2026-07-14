@@ -82,7 +82,7 @@ def scan_channel_cached(reference: str, _api_key: str):
     return YouTubeClient(_api_key).scan_channel(reference)
 
 
-@st.cache_data(ttl=24 * 60 * 60, max_entries=2000, show_spinner=False)
+@st.cache_data(ttl=6 * 60 * 60, max_entries=300, show_spinner=False)
 def fetch_transcript_cached(video_id: str, languages: tuple[str, ...]) -> TranscriptResult:
     """Reuse transcript results across visitors and repeated channel scans."""
 
