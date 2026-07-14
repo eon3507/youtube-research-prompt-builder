@@ -62,6 +62,39 @@ def videos_to_csv(videos: list, transcripts: dict[str, TranscriptResult] | None 
     return stream.getvalue()
 
 
+def markdown_cell(value: object) -> str:
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def videos_to_markdown(videos: list) -> str:
+    lines = [
+        "| # | Title | Views | Published | Duration | Link |",
+        "|---:|---|---:|---|---:|---|",
+    ]
+    for rank, video in enumerate(videos, start=1):
+        lines.append(
+            "| {rank} | {title} | {views} | {published} | {duration} | [Open video]({url}) |".format(
+                rank=rank,
+                title=markdown_cell(video.title),
+                views=format_views(video.views),
+                published=video.published_at[:10],
+                duration=format_duration(video.duration_seconds),
+                url=video.url,
+            )
+        )
+    return "\n".join(lines)
+
+
+def failures_to_markdown(failures: list[dict[str, str]]) -> str:
+    lines = ["| Title | Reason | Link |", "|---|---|---|"]
+    for failure in failures:
+        lines.append(
+            f"| {markdown_cell(failure['Title'])} | {markdown_cell(failure['Reason'])} | "
+            f"[Open video]({failure['URL']}) |"
+        )
+    return "\n".join(lines)
+
+
 def clear_scan() -> None:
     for key in (
         "channel",
@@ -154,7 +187,7 @@ reference = st.text_input(
 
 scan_col, reset_col = st.columns([1, 5])
 with scan_col:
-    scan_clicked = st.button("Scan channel", type="primary", use_container_width=True)
+    scan_clicked = st.button("Scan channel", type="primary", width="stretch")
 with reset_col:
     st.button("Clear", on_click=clear_scan)
 
@@ -217,18 +250,7 @@ if "channel" in st.session_state and "all_videos" in st.session_state:
     if not preview:
         st.warning("No videos match this content filter. Try All videos.")
     else:
-        rows = [
-            {
-                "#": rank,
-                "Title": video.title,
-                "Views": format_views(video.views),
-                "Published": video.published_at[:10],
-                "Duration": format_duration(video.duration_seconds),
-                "URL": video.url,
-            }
-            for rank, video in enumerate(preview, start=1)
-        ]
-        st.dataframe(rows, hide_index=True, use_container_width=True)
+        st.markdown(videos_to_markdown(preview))
 
         st.caption(
             "The app will try additional videos in the selected order when an earlier video has no accessible transcript."
@@ -236,7 +258,7 @@ if "channel" in st.session_state and "all_videos" in st.session_state:
         prepare_clicked = st.button(
             "Fetch YouTube transcripts and prepare files",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
 
         if prepare_clicked:
@@ -304,7 +326,7 @@ if "channel" in st.session_state and "all_videos" in st.session_state:
 
             if transcript_failures:
                 with st.expander("Videos skipped because a transcript was unavailable"):
-                    st.dataframe(transcript_failures, hide_index=True, use_container_width=True)
+                    st.markdown(failures_to_markdown(transcript_failures))
 
             if not transcript_videos:
                 st.error(
@@ -346,21 +368,21 @@ if "channel" in st.session_state and "all_videos" in st.session_state:
                     data=transcript_pack,
                     file_name="youtube_transcripts.md",
                     mime="text/markdown",
-                    use_container_width=True,
+                    width="stretch",
                 )
                 download_col2.download_button(
                     "Download prompt (.txt)",
                     data=prompt,
                     file_name="youtube_research_prompt.txt",
                     mime="text/plain",
-                    use_container_width=True,
+                    width="stretch",
                 )
                 download_col3.download_button(
                     "Download video list (.csv)",
                     data=videos_to_csv(transcript_videos, transcript_results),
                     file_name="selected_youtube_videos.csv",
                     mime="text/csv",
-                    use_container_width=True,
+                    width="stretch",
                 )
 
                 st.subheader("2. Copy this prompt into ChatGPT")

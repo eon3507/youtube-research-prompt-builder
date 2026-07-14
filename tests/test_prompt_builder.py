@@ -2,6 +2,7 @@ import pytest
 
 from prompt_builder import PromptOptions, build_prompt
 from transcripts import (
+    _CaptionHTMLParser,
     TranscriptResult,
     build_transcript_pack,
     format_timestamp,
@@ -88,3 +89,14 @@ def test_prompt_rejects_videos_without_transcripts() -> None:
     videos = [Video("abcdefghijk", "Missing", "https://youtu.be/abcdefghijk", "", 1, 60)]
     with pytest.raises(ValueError, match="available transcript"):
         build_prompt(videos, PromptOptions("Channel", "newest", "all"), {})
+
+
+def test_caption_parser_avoids_native_xml_and_preserves_text() -> None:
+    parser = _CaptionHTMLParser()
+    parser.feed(
+        '<transcript><text start="65.4" dur="2.1">A &amp; <i>B</i></text></transcript>'
+    )
+    parser.close()
+    assert parser.segments == [
+        {"text": "A & B", "start": 65.4, "duration": 2.1}
+    ]

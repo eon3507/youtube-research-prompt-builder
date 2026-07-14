@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from typing import Iterable
 
 from youtube_transcript_api import NoTranscriptFound, YouTubeTranscriptApi
@@ -30,6 +31,53 @@ class TranscriptResult:
         if self.source == "youtube-auto":
             return "YouTube auto-generated captions"
         return self.source or "Unknown transcript source"
+
+
+class _CaptionHTMLParser(HTMLParser):
+    """Parse YouTube's caption XML without the native ElementTree accelerator."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.segments: list[dict] = []
+        self._attributes: dict[str, str] | None = None
+        self._text_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() == "text":
+            self._attributes = {key: value or "" for key, value in attrs}
+            self._text_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._attributes is not None:
+            self._text_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() != "text" or self._attributes is None:
+            return
+        text = "".join(self._text_parts).replace("\n", " ").strip()
+        if text:
+            self.segments.append(
+                {
+                    "text": text,
+                    "start": float(self._attributes.get("start", "0") or 0),
+                    "duration": float(self._attributes.get("dur", "0") or 0),
+                }
+            )
+        self._attributes = None
+        self._text_parts = []
+
+
+def fetch_caption_segments_without_elementtree(transcript) -> tuple[dict, ...]:
+    """Fetch one chosen caption track and parse it with Python's streaming parser."""
+
+    if "&exp=xpe" in transcript._url:
+        raise RuntimeError("YouTube requires additional playback verification")
+    response = transcript._http_client.get(transcript._url, timeout=30)
+    response.raise_for_status()
+    parser = _CaptionHTMLParser()
+    parser.feed(response.text)
+    parser.close()
+    return tuple(parser.segments)
 
 
 def normalized_languages(languages: Iterable[str]) -> list[str]:
@@ -116,10 +164,7 @@ def fetch_transcript(video_id: str, languages: Iterable[str]) -> TranscriptResul
                 video_id, "unavailable", None, None, "", reason="No transcript found"
             )
 
-        fetched = transcript.fetch()
-        if hasattr(fetched, "to_raw_data"):
-            fetched = fetched.to_raw_data()
-        segments = normalize_segments(fetched)
+        segments = fetch_caption_segments_without_elementtree(transcript)
         if not segments:
             return TranscriptResult(
                 video_id, "unavailable", None, None, "", reason="Transcript was empty"
