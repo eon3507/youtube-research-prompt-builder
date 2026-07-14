@@ -1,4 +1,4 @@
 google-api-python-client==2.198.0
 python-dotenv==1.2.2
+requests==2.34.2
 streamlit==1.59.1
-youtube-transcript-api==1.2.4

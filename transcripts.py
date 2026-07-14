@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import html
+import threading
+import time
 from dataclasses import dataclass
-from html.parser import HTMLParser
 from typing import Iterable
 
-from youtube_transcript_api import NoTranscriptFound, YouTubeTranscriptApi
-from youtube_transcript_api.proxies import WebshareProxyConfig
+import requests
+
+
+SUPADATA_TRANSCRIPT_URL = "https://api.supadata.ai/v1/transcript"
+SUPADATA_MIN_REQUEST_INTERVAL_SECONDS = 1.05
+_supadata_request_lock = threading.Lock()
+_last_supadata_request_started = 0.0
 
 
 @dataclass(frozen=True)
@@ -31,54 +37,9 @@ class TranscriptResult:
             return "YouTube human-created captions"
         if self.source == "youtube-auto":
             return "YouTube auto-generated captions"
+        if self.source == "supadata-native":
+            return "Existing YouTube captions via Supadata (manual/auto not identified)"
         return self.source or "Unknown transcript source"
-
-
-class _CaptionHTMLParser(HTMLParser):
-    """Parse YouTube's caption XML without the native ElementTree accelerator."""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.segments: list[dict] = []
-        self._attributes: dict[str, str] | None = None
-        self._text_parts: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.lower() == "text":
-            self._attributes = {key: value or "" for key, value in attrs}
-            self._text_parts = []
-
-    def handle_data(self, data: str) -> None:
-        if self._attributes is not None:
-            self._text_parts.append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag.lower() != "text" or self._attributes is None:
-            return
-        text = "".join(self._text_parts).replace("\n", " ").strip()
-        if text:
-            self.segments.append(
-                {
-                    "text": text,
-                    "start": float(self._attributes.get("start", "0") or 0),
-                    "duration": float(self._attributes.get("dur", "0") or 0),
-                }
-            )
-        self._attributes = None
-        self._text_parts = []
-
-
-def fetch_caption_segments_without_elementtree(transcript) -> tuple[dict, ...]:
-    """Fetch one chosen caption track and parse it with Python's streaming parser."""
-
-    if "&exp=xpe" in transcript._url:
-        raise RuntimeError("YouTube requires additional playback verification")
-    response = transcript._http_client.get(transcript._url, timeout=30)
-    response.raise_for_status()
-    parser = _CaptionHTMLParser()
-    parser.feed(response.text)
-    parser.close()
-    return tuple(parser.segments)
 
 
 def normalized_languages(languages: Iterable[str]) -> list[str]:
@@ -121,79 +82,117 @@ def segments_to_timestamped_text(segments: Iterable[dict]) -> str:
     )
 
 
+def normalize_supadata_segments(raw_segments: object) -> tuple[dict, ...]:
+    """Convert Supadata's millisecond caption chunks to local second-based segments."""
+
+    if not isinstance(raw_segments, list):
+        return ()
+    segments: list[dict] = []
+    for segment in raw_segments:
+        if not isinstance(segment, dict):
+            continue
+        text = html.unescape(str(segment.get("text", ""))).replace("\n", " ").strip()
+        if text:
+            segments.append(
+                {
+                    "text": text,
+                    "start": float(segment.get("offset", 0) or 0) / 1000,
+                    "duration": float(segment.get("duration", 0) or 0) / 1000,
+                }
+            )
+    return tuple(segments)
+
+
+def _supadata_get(api_key: str, params: dict[str, str]):
+    """Serialize free-tier requests and keep them below Supadata's one-per-second limit."""
+
+    global _last_supadata_request_started
+    with _supadata_request_lock:
+        wait_seconds = SUPADATA_MIN_REQUEST_INTERVAL_SECONDS - (
+            time.monotonic() - _last_supadata_request_started
+        )
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+        _last_supadata_request_started = time.monotonic()
+        return requests.get(
+            SUPADATA_TRANSCRIPT_URL,
+            headers={"x-api-key": api_key},
+            params=params,
+            timeout=45,
+        )
+
+
 def fetch_transcript(
     video_id: str,
     languages: Iterable[str],
     *,
-    proxy_username: str = "",
-    proxy_password: str = "",
+    api_key: str = "",
 ) -> TranscriptResult:
-    """Fetch the best public YouTube transcript without translating its wording."""
+    """Fetch one existing YouTube caption track through Supadata native mode."""
 
     preferred = normalized_languages(languages)
-    username = proxy_username.strip()
-    password = proxy_password.strip()
-    if bool(username) != bool(password):
+    key = api_key.strip()
+    if not key:
         return TranscriptResult(
             video_id,
             "unavailable",
             None,
             None,
             "",
-            reason="Residential proxy credentials are incomplete",
+            reason="Supadata API key is not configured",
         )
 
     try:
-        transcript_api = (
-            YouTubeTranscriptApi(
-                proxy_config=WebshareProxyConfig(
-                    proxy_username=username,
-                    proxy_password=password,
-                )
-            )
-            if username and password
-            else YouTubeTranscriptApi()
+        response = _supadata_get(
+            key,
+            {
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+                "lang": preferred[0],
+                "text": "false",
+                "mode": "native",
+            },
         )
-        transcript_list = transcript_api.list(video_id)
-        transcript = None
-        source = None
-
-        attempts = [
-            ("youtube-manual", lambda: transcript_list.find_manually_created_transcript(preferred)),
-            ("youtube-auto", lambda: transcript_list.find_generated_transcript(preferred)),
-        ]
-        if "en" not in preferred:
-            attempts.extend(
-                [
-                    ("youtube-manual", lambda: transcript_list.find_manually_created_transcript(["en"])),
-                    ("youtube-auto", lambda: transcript_list.find_generated_transcript(["en"])),
-                ]
-            )
-
-        for candidate_source, finder in attempts:
-            try:
-                transcript = finder()
-                source = candidate_source
-                break
-            except NoTranscriptFound:
-                continue
-
-        if transcript is None:
-            for candidate in transcript_list:
-                transcript = candidate
-                source = (
-                    "youtube-auto"
-                    if bool(getattr(candidate, "is_generated", False))
-                    else "youtube-manual"
-                )
-                break
-
-        if transcript is None:
+        error_reasons = {
+            206: "No existing transcript is available",
+            401: "Supadata API key is invalid",
+            402: "Supadata free transcript allowance has been exhausted",
+            403: "Video requires authentication or is restricted",
+            404: "Video or transcript was not found",
+            429: "Supadata free transcript allowance or rate limit has been reached",
+        }
+        if response.status_code == 202:
             return TranscriptResult(
-                video_id, "unavailable", None, None, "", reason="No transcript found"
+                video_id,
+                "unavailable",
+                None,
+                None,
+                "",
+                reason="Supadata queued the transcript unexpectedly; try again later",
+            )
+        if response.status_code != 200:
+            return TranscriptResult(
+                video_id,
+                "unavailable",
+                None,
+                None,
+                "",
+                reason=error_reasons.get(
+                    response.status_code,
+                    f"Supadata transcript request failed (HTTP {response.status_code})",
+                ),
             )
 
-        segments = fetch_caption_segments_without_elementtree(transcript)
+        payload = response.json()
+        if payload.get("jobId"):
+            return TranscriptResult(
+                video_id,
+                "unavailable",
+                None,
+                None,
+                "",
+                reason="Supadata queued the transcript unexpectedly; try again later",
+            )
+        segments = normalize_supadata_segments(payload.get("content"))
         if not segments:
             return TranscriptResult(
                 video_id, "unavailable", None, None, "", reason="Transcript was empty"
@@ -204,30 +203,28 @@ def fetch_transcript(
         return TranscriptResult(
             video_id=video_id,
             status="available",
-            language=getattr(transcript, "language_code", None),
-            source=source,
+            language=str(payload.get("lang") or preferred[0]),
+            source="supadata-native",
             timestamped_text=timestamped_text,
             segment_count=len(segments),
         )
-    except Exception as exc:  # YouTube exposes several changing transcript error classes.
-        error_name = type(exc).__name__
-        friendly_reasons = {
-            "TranscriptsDisabled": "Captions are disabled",
-            "NoTranscriptFound": "No accessible transcript found",
-            "VideoUnavailable": "Video is unavailable",
-            "AgeRestricted": "Video is age restricted",
-            "RequestBlocked": "YouTube blocked transcript access from this server",
-            "IpBlocked": "YouTube blocked transcript access from this server",
-            "PoTokenRequired": "YouTube requires additional playback verification",
-        }
-        return TranscriptResult(
-            video_id=video_id,
-            status="unavailable",
-            language=None,
-            source=None,
-            timestamped_text="",
-            reason=friendly_reasons.get(error_name, f"Transcript retrieval failed ({error_name})"),
-        )
+    except requests.Timeout:
+        reason = "Supadata transcript request timed out"
+    except requests.RequestException:
+        reason = "Supadata transcript request failed"
+    except (AttributeError, TypeError, ValueError):
+        reason = "Supadata returned invalid transcript data"
+    except Exception:
+        reason = "Unexpected Supadata transcript error"
+
+    return TranscriptResult(
+        video_id=video_id,
+        status="unavailable",
+        language=None,
+        source=None,
+        timestamped_text="",
+        reason=reason,
+    )
 
 
 def format_timestamp(seconds: float | int | None) -> str:
@@ -245,8 +242,8 @@ def build_transcript_pack(videos: list, transcripts: dict[str, TranscriptResult]
     blocks: list[str] = [
         "# YouTube transcript pack",
         "",
-        "This file contains transcript text retrieved directly from YouTube captions.",
-        "Human-created captions are preferred. Auto-generated captions may contain recognition errors.",
+        "This file contains existing YouTube caption text retrieved through Supadata native mode.",
+        "No AI transcript was generated. The caption track may be human-created or auto-generated.",
         "",
     ]
     for rank, video in enumerate(videos, start=1):

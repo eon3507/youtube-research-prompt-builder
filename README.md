@@ -2,23 +2,24 @@
 
 This is a separate companion to the original **YouTube Channel Nuggets** project. It scans a YouTube channel, selects the most-viewed or newest videos, retrieves their timestamped YouTube captions, and builds a transcript-only research package for ChatGPT.
 
-It does **not** call Gemini, OpenAI, or any other language-model API. It uses YouTube Data API v3 for channel/video metadata and `youtube-transcript-api` for publicly accessible YouTube captions.
+It does **not** call Gemini, OpenAI, or any other language-model API. It uses YouTube Data API v3 for channel/video metadata and Supadata in native mode for existing YouTube captions.
 
 ## Recommended workflow
 
 1. Double-click `start_app.bat`.
 2. On first launch, the app creates `.env` and opens it in Notepad.
-3. Paste your YouTube Data API v3 key after `YOUTUBE_API_KEY=` and save.
-4. Double-click `start_app.bat` again.
-5. Paste a channel URL or `@handle`.
-6. Choose **Most viewed** or **Newest**, the content type, and the number of videos.
-7. Scan the channel and click **Fetch YouTube transcripts and prepare files**.
-8. Download `youtube_transcripts.md`.
-9. Start a new ChatGPT Deep Research conversation and attach the transcript file.
-10. Restrict research sources to uploaded files when that option is available.
-11. Paste the generated prompt directly into the message box and send it. Do not upload the prompt itself as a file.
+3. Paste your YouTube Data API v3 key after `YOUTUBE_API_KEY=`.
+4. Create a free Supadata key and paste it after `SUPADATA_API_KEY=`, then save.
+5. Double-click `start_app.bat` again.
+6. Paste a channel URL or `@handle`.
+7. Choose **Most viewed** or **Newest**, the content type, and the number of videos.
+8. Scan the channel and click **Fetch YouTube transcripts and prepare files**.
+9. Download `youtube_transcripts.md`.
+10. Start a new ChatGPT Deep Research conversation and attach the transcript file.
+11. Restrict research sources to uploaded files when that option is available.
+12. Paste the generated prompt directly into the message box and send it. Do not upload the prompt itself as a file.
 
-The prompt asks ChatGPT to process the videos one by one in a strict repeating sequence: **Video → Key takeaways → Best nuggets → Best quotes**, followed immediately by the next video. It prohibits Instagram, blogs, summaries, and other external sources. Video-specific claims and quotes must come only from the timestamped transcript pack.
+The prompt asks ChatGPT to process the videos one by one in a strict repeating sequence: **Video → Best nuggets → Best quotes → Key takeaways**, followed immediately by the next video. It prohibits Instagram, blogs, summaries, and other external sources. Video-specific claims and quotes must come only from the timestamped transcript pack.
 
 For public deployments, the app accepts direct channel URLs, `@handles`, usernames, and channel IDs instead of free-text channel-name searches. Metadata scans and compact transcript text are cached for six hours, and each browser session is rate limited. If a selected video has no accessible transcript, the app checks later videos in the chosen order until it reaches the requested count or its safety limit.
 
@@ -30,18 +31,17 @@ The app obtains the upload playlist and requests metadata in groups of 50, so ev
 
 ## Transcript accuracy and limitations
 
-The transcript library retrieves caption data from YouTube but is not YouTube's official caption-download API. YouTube can change or block this access, particularly from shared cloud-hosting IP addresses. Videos with disabled, restricted, or unavailable captions are skipped rather than replaced with third-party websites.
+Supadata native mode retrieves existing YouTube caption tracks and never generates an AI transcript. Videos with disabled, restricted, or unavailable captions are skipped.
 
-For a public Streamlit deployment, use a Webshare **Residential** rotating proxy package. In the Streamlit app dashboard, open **Settings > Secrets** and add:
+For a public Streamlit deployment, create a free Supadata API key. In the Streamlit app dashboard, open **Settings > Secrets** and add:
 
 ```toml
-WEBSHARE_PROXY_USERNAME = "your-proxy-username"
-WEBSHARE_PROXY_PASSWORD = "your-proxy-password"
+SUPADATA_API_KEY = "your-free-api-key"
 ```
 
-The app automatically routes transcript requests through the rotating residential proxy when both secrets are present. It never displays or stores the credentials in generated files. When both values are blank, local installations continue to request captions directly.
+The free plan provides 100 credits per month, and each native transcript request uses one credit, including an unavailable result. The app checks exactly the requested number of videos, caches results for six hours, and spaces requests to respect the free plan's one-request-per-second limit. When the allowance is exhausted, requests stop instead of creating a charge.
 
-Human-created captions are preferred. YouTube auto-generated captions are used when necessary and are clearly labelled because speech-recognition errors are possible. Quotes from auto-generated captions should be checked against the linked video at the supplied timestamp before publication or other high-stakes use.
+Supadata does not identify whether a native caption track is human-created or auto-generated. Quotes should therefore be checked against the linked video at the supplied timestamp before publication or other high-stakes use.
 
 Large transcript packs and detailed reports can exceed practical model context or output limits. When that occurs, request fewer videos per package or ask ChatGPT to continue from the next unfinished video without shortening later entries.
 

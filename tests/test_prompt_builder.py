@@ -3,11 +3,11 @@ import transcripts as transcripts_module
 
 from prompt_builder import PromptOptions, build_prompt
 from transcripts import (
-    _CaptionHTMLParser,
     TranscriptResult,
     build_transcript_pack,
     format_timestamp,
     normalize_segments,
+    normalize_supadata_segments,
     segments_to_timestamped_text,
 )
 from youtube_api import Video
@@ -23,7 +23,7 @@ def test_prompt_contains_every_video_and_safety_rules() -> None:
             "abcdefghijk",
             "available",
             "en",
-            "youtube-manual",
+            "supadata-native",
             "[00:05] First exact line",
             1,
         ),
@@ -68,6 +68,7 @@ def test_prompt_contains_every_video_and_safety_rules() -> None:
     assert "External web sources are prohibited" in prompt
     assert "Instagram" in prompt
     assert "Auto-generated caption — verify against audio" in prompt
+    assert "Caption wording — verify against audio" in prompt
     assert "verification ledger" in prompt
     assert "42" in prompt and "99" in prompt
 
@@ -97,67 +98,73 @@ def test_prompt_rejects_videos_without_transcripts() -> None:
         build_prompt(videos, PromptOptions("Channel", "newest", "all"), {})
 
 
-def test_caption_parser_avoids_native_xml_and_preserves_text() -> None:
-    parser = _CaptionHTMLParser()
-    parser.feed(
-        '<transcript><text start="65.4" dur="2.1">A &amp; <i>B</i></text></transcript>'
+def test_supadata_segments_convert_milliseconds_and_preserve_text() -> None:
+    segments = normalize_supadata_segments(
+        [{"text": "A &amp; B", "offset": 65400, "duration": 2100, "lang": "en"}]
     )
-    parser.close()
-    assert parser.segments == [
-        {"text": "A & B", "start": 65.4, "duration": 2.1}
-    ]
+
+    assert segments == ({"text": "A & B", "start": 65.4, "duration": 2.1},)
 
 
-def test_fetch_transcript_uses_webshare_residential_proxy(monkeypatch) -> None:
+def test_fetch_transcript_uses_supadata_native_mode(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    class FakeTranscript:
-        language_code = "en"
+    class FakeResponse:
+        status_code = 200
 
-    class FakeTranscriptList:
-        def find_manually_created_transcript(self, languages):
-            assert languages == ["en"]
-            return FakeTranscript()
+        @staticmethod
+        def json():
+            return {
+                "content": [
+                    {"text": "Exact line", "offset": 5000, "duration": 1000, "lang": "en"}
+                ],
+                "lang": "en",
+                "availableLangs": ["en"],
+            }
 
-    class FakeYouTubeTranscriptApi:
-        def __init__(self, proxy_config=None):
-            captured["proxy_config"] = proxy_config
+    def fake_supadata_get(api_key, params):
+        captured["api_key"] = api_key
+        captured["params"] = params
+        return FakeResponse()
 
-        def list(self, video_id):
-            assert video_id == "abcdefghijk"
-            return FakeTranscriptList()
-
-    monkeypatch.setattr(
-        transcripts_module,
-        "YouTubeTranscriptApi",
-        FakeYouTubeTranscriptApi,
-    )
-    monkeypatch.setattr(
-        transcripts_module,
-        "fetch_caption_segments_without_elementtree",
-        lambda transcript: ({"text": "Exact line", "start": 5.0, "duration": 1.0},),
-    )
+    monkeypatch.setattr(transcripts_module, "_supadata_get", fake_supadata_get)
 
     result = transcripts_module.fetch_transcript(
         "abcdefghijk",
         ["en"],
-        proxy_username="proxy-user",
-        proxy_password="proxy-password",
+        api_key="free-api-key",
     )
 
-    proxy_config = captured["proxy_config"]
-    assert proxy_config.__class__.__name__ == "WebshareProxyConfig"
-    assert "proxy-user-rotate" in proxy_config.to_requests_dict()["https"]
+    assert captured["api_key"] == "free-api-key"
+    assert captured["params"]["mode"] == "native"
+    assert captured["params"]["text"] == "false"
     assert result.available
+    assert result.source == "supadata-native"
     assert result.timestamped_text == "[00:05] Exact line"
 
 
-def test_fetch_transcript_rejects_incomplete_proxy_credentials() -> None:
+def test_fetch_transcript_requires_supadata_api_key() -> None:
+    result = transcripts_module.fetch_transcript("abcdefghijk", ["en"])
+
+    assert not result.available
+    assert result.reason == "Supadata API key is not configured"
+
+
+def test_fetch_transcript_reports_free_limit(monkeypatch) -> None:
+    class FakeResponse:
+        status_code = 429
+
+    monkeypatch.setattr(
+        transcripts_module,
+        "_supadata_get",
+        lambda api_key, params: FakeResponse(),
+    )
+
     result = transcripts_module.fetch_transcript(
         "abcdefghijk",
         ["en"],
-        proxy_username="proxy-user",
+        api_key="free-api-key",
     )
 
     assert not result.available
-    assert result.reason == "Residential proxy credentials are incomplete"
+    assert "free transcript allowance" in result.reason

@@ -52,12 +52,18 @@ def build_prompt(
     for rank, video in enumerate(videos, start=1):
         published = video.published_at[:10] if video.published_at else "Unknown"
         transcript = transcripts[video.video_id]
-        auto_caption_note = (
-            " This source is automatically generated, so append "
-            "`(Auto-generated caption — verify against audio)` after each quotation."
-            if transcript.source == "youtube-auto"
-            else ""
-        )
+        if transcript.source == "youtube-auto":
+            caption_verification_note = (
+                " This source is automatically generated, so append "
+                "`(Auto-generated caption — verify against audio)` after each quotation."
+            )
+        elif transcript.source == "supadata-native":
+            caption_verification_note = (
+                " The provider does not identify whether the caption track is human-created or "
+                "auto-generated, so append `(Caption wording — verify against audio)` after each quotation."
+            )
+        else:
+            caption_verification_note = ""
         video_blocks.append(
             f"""# Video {rank} — {video.title}
 
@@ -74,7 +80,7 @@ def build_prompt(
 
 ## Best quotes
 
-[Quote only exact wording present in the Video {rank} transcript. For every quote, give the timestamp, context, and why it is valuable. Do not add a separate classification field to any quote. Never invent, reconstruct, polish, or silently correct transcript wording. Do not place paraphrases inside quotation marks.{auto_caption_note}]
+[Quote only exact wording present in the Video {rank} transcript. For every quote, give the timestamp, context, and why it is valuable. Do not add a separate classification field to any quote. Never invent, reconstruct, polish, or silently correct transcript wording. Do not place paraphrases inside quotation marks.{caption_verification_note}]
 
 ## Key takeaways
 
@@ -120,7 +126,7 @@ The complete structure is expanded below for all {len(videos)} videos. Research 
 8. Treat every video independently, even when ideas repeat across videos.
 9. Do not optimize for brevity. Preserve useful details, examples, stories, and applications.
 10. If a single document cannot contain the full result, continue in numbered parts without changing the template or shortening later videos. Resume with the next unfinished video and do not repeat completed videos.
-11. Treat wording from auto-generated captions as potentially imperfect. Preserve it exactly when quoting, show its timestamp, and append `(Auto-generated caption — verify against audio)` after the quotation without adding a separate classification field.
+11. Treat caption wording as potentially imperfect. Preserve it exactly when quoting, show its timestamp, and append the supplied verification note after the quotation without adding a separate classification field.
 
 ## Complete video-by-video answer skeleton
 

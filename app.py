@@ -131,18 +131,12 @@ def scan_channel_cached(reference: str, _api_key: str):
 def fetch_transcript_cached(
     video_id: str,
     languages: tuple[str, ...],
-    proxy_enabled: bool,
-    _proxy_username: str,
-    _proxy_password: str,
+    provider_version: str,
+    _supadata_api_key: str,
 ) -> TranscriptResult:
     """Reuse transcript results across visitors and repeated channel scans."""
 
-    return fetch_transcript(
-        video_id,
-        languages,
-        proxy_username=_proxy_username if proxy_enabled else "",
-        proxy_password=_proxy_password if proxy_enabled else "",
-    )
+    return fetch_transcript(video_id, languages, api_key=_supadata_api_key)
 
 
 def register_scan_attempt() -> bool:
@@ -263,10 +257,7 @@ if "channel" in st.session_state and "all_videos" in st.session_state:
         requested_count,
         transcript_languages,
     )
-    proxy_username = configuration_value("WEBSHARE_PROXY_USERNAME")
-    proxy_password = configuration_value("WEBSHARE_PROXY_PASSWORD")
-    proxy_credentials_incomplete = bool(proxy_username) != bool(proxy_password)
-    proxy_enabled = bool(proxy_username and proxy_password)
+    supadata_api_key = configuration_value("SUPADATA_API_KEY")
 
     st.subheader(channel.title)
     metric_cols = st.columns(3)
@@ -280,7 +271,7 @@ if "channel" in st.session_state and "all_videos" in st.session_state:
         st.markdown(videos_to_markdown(preview))
 
         st.caption(
-            "The app will try additional videos in the selected order when an earlier video has no accessible transcript."
+            "To protect the free transcript allowance, the app checks only the requested videos."
         )
         prepare_clicked = st.button(
             "Fetch YouTube transcripts and prepare files",
@@ -289,21 +280,15 @@ if "channel" in st.session_state and "all_videos" in st.session_state:
         )
 
         if prepare_clicked:
-            if proxy_credentials_incomplete:
-                st.error(
-                    "The residential proxy configuration is incomplete. Add both Webshare proxy secrets."
-                )
+            if not supadata_api_key:
+                st.error("Add SUPADATA_API_KEY to the Streamlit app secrets.")
             elif not register_transcript_attempt():
                 st.warning(
                     "This browser has reached the temporary transcript preparation limit. "
                     "Please try again in 15 minutes."
                 )
             else:
-                max_candidates = min(
-                    len(eligible),
-                    max(requested_count * 2, requested_count + 10),
-                    50,
-                )
+                max_candidates = min(len(eligible), requested_count)
                 transcript_videos: list = []
                 transcript_results: dict[str, TranscriptResult] = {}
                 transcript_failures: list[dict[str, str]] = []
@@ -313,9 +298,8 @@ if "channel" in st.session_state and "all_videos" in st.session_state:
                     result = fetch_transcript_cached(
                         video.video_id,
                         transcript_languages,
-                        proxy_enabled,
-                        proxy_username,
-                        proxy_password,
+                        "supadata-native-v1",
+                        supadata_api_key,
                     )
                     if result.available:
                         transcript_videos.append(video)
@@ -354,9 +338,9 @@ if "channel" in st.session_state and "all_videos" in st.session_state:
             result_metrics[0].metric("Transcript-ready videos", len(transcript_videos))
             result_metrics[1].metric("Unavailable candidates", len(transcript_failures))
             result_metrics[2].metric(
-                "Auto-generated transcripts",
+                "Native captions retrieved",
                 sum(
-                    result.source == "youtube-auto"
+                    result.source == "supadata-native"
                     for result in transcript_results.values()
                 ),
             )
@@ -367,8 +351,7 @@ if "channel" in st.session_state and "all_videos" in st.session_state:
 
             if not transcript_videos:
                 st.error(
-                    "No accessible YouTube transcripts were retrieved. YouTube may have disabled captions "
-                    "or blocked transcript requests from this hosting server."
+                    "No existing YouTube captions were retrieved. Open the skipped-video list for the exact reason."
                 )
             else:
                 if len(transcript_videos) < requested_count:
