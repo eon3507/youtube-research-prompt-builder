@@ -8,6 +8,7 @@ from html.parser import HTMLParser
 from typing import Iterable
 
 from youtube_transcript_api import NoTranscriptFound, YouTubeTranscriptApi
+from youtube_transcript_api.proxies import WebshareProxyConfig
 
 
 @dataclass(frozen=True)
@@ -120,12 +121,40 @@ def segments_to_timestamped_text(segments: Iterable[dict]) -> str:
     )
 
 
-def fetch_transcript(video_id: str, languages: Iterable[str]) -> TranscriptResult:
+def fetch_transcript(
+    video_id: str,
+    languages: Iterable[str],
+    *,
+    proxy_username: str = "",
+    proxy_password: str = "",
+) -> TranscriptResult:
     """Fetch the best public YouTube transcript without translating its wording."""
 
     preferred = normalized_languages(languages)
+    username = proxy_username.strip()
+    password = proxy_password.strip()
+    if bool(username) != bool(password):
+        return TranscriptResult(
+            video_id,
+            "unavailable",
+            None,
+            None,
+            "",
+            reason="Residential proxy credentials are incomplete",
+        )
+
     try:
-        transcript_list = YouTubeTranscriptApi().list(video_id)
+        transcript_api = (
+            YouTubeTranscriptApi(
+                proxy_config=WebshareProxyConfig(
+                    proxy_username=username,
+                    proxy_password=password,
+                )
+            )
+            if username and password
+            else YouTubeTranscriptApi()
+        )
+        transcript_list = transcript_api.list(video_id)
         transcript = None
         source = None
 

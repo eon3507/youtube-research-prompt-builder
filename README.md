@@ -32,6 +32,15 @@ The app obtains the upload playlist and requests metadata in groups of 50, so ev
 
 The transcript library retrieves caption data from YouTube but is not YouTube's official caption-download API. YouTube can change or block this access, particularly from shared cloud-hosting IP addresses. Videos with disabled, restricted, or unavailable captions are skipped rather than replaced with third-party websites.
 
+For a public Streamlit deployment, use a Webshare **Residential** rotating proxy package. In the Streamlit app dashboard, open **Settings > Secrets** and add:
+
+```toml
+WEBSHARE_PROXY_USERNAME = "your-proxy-username"
+WEBSHARE_PROXY_PASSWORD = "your-proxy-password"
+```
+
+The app automatically routes transcript requests through the rotating residential proxy when both secrets are present. It never displays or stores the credentials in generated files. When both values are blank, local installations continue to request captions directly.
+
 Human-created captions are preferred. YouTube auto-generated captions are used when necessary and are clearly labelled because speech-recognition errors are possible. Quotes from auto-generated captions should be checked against the linked video at the supplied timestamp before publication or other high-stakes use.
 
 Large transcript packs and detailed reports can exceed practical model context or output limits. When that occurs, request fewer videos per package or ask ChatGPT to continue from the next unfinished video without shortening later entries.

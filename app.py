@@ -30,6 +30,18 @@ MAX_TRANSCRIPT_PREPARATIONS_PER_WINDOW = 5
 st.set_page_config(page_title="YouTube Research Prompt Builder", page_icon="▶️", layout="wide")
 
 
+def configuration_value(name: str) -> str:
+    """Read local environment values or root-level Streamlit secrets."""
+
+    environment_value = os.getenv(name, "").strip()
+    if environment_value:
+        return environment_value
+    try:
+        return str(st.secrets.get(name, "")).strip()
+    except Exception:
+        return ""
+
+
 def videos_to_csv(videos: list, transcripts: dict[str, TranscriptResult] | None = None) -> str:
     stream = io.StringIO()
     writer = csv.writer(stream, lineterminator="\n")
@@ -116,10 +128,21 @@ def scan_channel_cached(reference: str, _api_key: str):
 
 
 @st.cache_data(ttl=6 * 60 * 60, max_entries=300, show_spinner=False)
-def fetch_transcript_cached(video_id: str, languages: tuple[str, ...]) -> TranscriptResult:
+def fetch_transcript_cached(
+    video_id: str,
+    languages: tuple[str, ...],
+    proxy_enabled: bool,
+    _proxy_username: str,
+    _proxy_password: str,
+) -> TranscriptResult:
     """Reuse transcript results across visitors and repeated channel scans."""
 
-    return fetch_transcript(video_id, languages)
+    return fetch_transcript(
+        video_id,
+        languages,
+        proxy_username=_proxy_username if proxy_enabled else "",
+        proxy_password=_proxy_password if proxy_enabled else "",
+    )
 
 
 def register_scan_attempt() -> bool:
@@ -240,6 +263,10 @@ if "channel" in st.session_state and "all_videos" in st.session_state:
         requested_count,
         transcript_languages,
     )
+    proxy_username = configuration_value("WEBSHARE_PROXY_USERNAME")
+    proxy_password = configuration_value("WEBSHARE_PROXY_PASSWORD")
+    proxy_credentials_incomplete = bool(proxy_username) != bool(proxy_password)
+    proxy_enabled = bool(proxy_username and proxy_password)
 
     st.subheader(channel.title)
     metric_cols = st.columns(3)
@@ -262,7 +289,11 @@ if "channel" in st.session_state and "all_videos" in st.session_state:
         )
 
         if prepare_clicked:
-            if not register_transcript_attempt():
+            if proxy_credentials_incomplete:
+                st.error(
+                    "The residential proxy configuration is incomplete. Add both Webshare proxy secrets."
+                )
+            elif not register_transcript_attempt():
                 st.warning(
                     "This browser has reached the temporary transcript preparation limit. "
                     "Please try again in 15 minutes."
@@ -279,7 +310,13 @@ if "channel" in st.session_state and "all_videos" in st.session_state:
                 progress = st.progress(0, text="Checking YouTube transcripts…")
 
                 for index, video in enumerate(eligible[:max_candidates]):
-                    result = fetch_transcript_cached(video.video_id, transcript_languages)
+                    result = fetch_transcript_cached(
+                        video.video_id,
+                        transcript_languages,
+                        proxy_enabled,
+                        proxy_username,
+                        proxy_password,
+                    )
                     if result.available:
                         transcript_videos.append(video)
                         transcript_results[video.video_id] = result

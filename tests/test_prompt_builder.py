@@ -1,4 +1,5 @@
 import pytest
+import transcripts as transcripts_module
 
 from prompt_builder import PromptOptions, build_prompt
 from transcripts import (
@@ -54,8 +55,13 @@ def test_prompt_contains_every_video_and_safety_rules() -> None:
     assert "## Key takeaways" in prompt
     assert "## Best nuggets" in prompt
     assert "## Best quotes" in prompt
+    assert "extract 6 to 10" in prompt
+    assert "write 3 to 7" in prompt
+    assert "Every nugget must be supported by the transcript" in prompt
+    assert "Every takeaway must be supported by the transcript" in prompt
     skeleton = prompt.split("## Complete video-by-video answer skeleton", 1)[1]
-    assert skeleton.index("## Key takeaways") < skeleton.index("## Best nuggets") < skeleton.index("## Best quotes")
+    assert skeleton.index("## Best nuggets") < skeleton.index("## Best quotes") < skeleton.index("## Key takeaways")
+    assert "label it" not in prompt
     assert "Do not write a report introduction, executive synthesis" in prompt
     assert "exactly 2 top-level `# Video` headings" in prompt
     assert "youtube_transcripts.md" in prompt
@@ -100,3 +106,58 @@ def test_caption_parser_avoids_native_xml_and_preserves_text() -> None:
     assert parser.segments == [
         {"text": "A & B", "start": 65.4, "duration": 2.1}
     ]
+
+
+def test_fetch_transcript_uses_webshare_residential_proxy(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeTranscript:
+        language_code = "en"
+
+    class FakeTranscriptList:
+        def find_manually_created_transcript(self, languages):
+            assert languages == ["en"]
+            return FakeTranscript()
+
+    class FakeYouTubeTranscriptApi:
+        def __init__(self, proxy_config=None):
+            captured["proxy_config"] = proxy_config
+
+        def list(self, video_id):
+            assert video_id == "abcdefghijk"
+            return FakeTranscriptList()
+
+    monkeypatch.setattr(
+        transcripts_module,
+        "YouTubeTranscriptApi",
+        FakeYouTubeTranscriptApi,
+    )
+    monkeypatch.setattr(
+        transcripts_module,
+        "fetch_caption_segments_without_elementtree",
+        lambda transcript: ({"text": "Exact line", "start": 5.0, "duration": 1.0},),
+    )
+
+    result = transcripts_module.fetch_transcript(
+        "abcdefghijk",
+        ["en"],
+        proxy_username="proxy-user",
+        proxy_password="proxy-password",
+    )
+
+    proxy_config = captured["proxy_config"]
+    assert proxy_config.__class__.__name__ == "WebshareProxyConfig"
+    assert "proxy-user-rotate" in proxy_config.to_requests_dict()["https"]
+    assert result.available
+    assert result.timestamped_text == "[00:05] Exact line"
+
+
+def test_fetch_transcript_rejects_incomplete_proxy_credentials() -> None:
+    result = transcripts_module.fetch_transcript(
+        "abcdefghijk",
+        ["en"],
+        proxy_username="proxy-user",
+    )
+
+    assert not result.available
+    assert result.reason == "Residential proxy credentials are incomplete"

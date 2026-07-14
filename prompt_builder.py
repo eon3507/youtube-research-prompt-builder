@@ -53,8 +53,8 @@ def build_prompt(
         published = video.published_at[:10] if video.published_at else "Unknown"
         transcript = transcripts[video.video_id]
         auto_caption_note = (
-            " This source is automatically generated, so mark each quotation as "
-            "`Auto-generated caption — verify against audio`."
+            " This source is automatically generated, so append "
+            "`(Auto-generated caption — verify against audio)` after each quotation."
             if transcript.source == "youtube-auto"
             else ""
         )
@@ -68,17 +68,17 @@ def build_prompt(
 **Transcript source:** {transcript.source_label}
 **Transcript language:** {transcript.language or "Unknown"}
 
-## Key takeaways
-
-[Using only the Video {rank} transcript in `{transcript_filename}`, write all important actionable lessons. Aim for at least 8 when the transcript supports them. Explain what each takeaway means, why it matters, who it is useful for, and how to apply it. Keep every takeaway specific to this video.]
-
 ## Best nuggets
 
-[Using only the Video {rank} transcript, extract the strongest ideas, frameworks, tactics, stories, examples, mental models, and surprising observations. Aim for at least 10 when the transcript supports them. Give each nugget a descriptive headline, substantial explanation, supporting reasoning or example, why it matters, and a practical use. Include the transcript timestamp.]
+[Using only the Video {rank} transcript, extract 6 to 10 of the strongest ideas, frameworks, tactics, stories, examples, mental models, and surprising observations. Every nugget must be supported by the transcript. Give each nugget a descriptive headline, substantial explanation, supporting reasoning or example, why it matters, and a practical use. Include the transcript timestamp.]
 
 ## Best quotes
 
-[Quote only exact wording present in the Video {rank} transcript. For every quote, give the timestamp, context, and why it is valuable. Never invent, reconstruct, polish, or silently correct transcript wording. Do not place paraphrases inside quotation marks.{auto_caption_note}]"""
+[Quote only exact wording present in the Video {rank} transcript. For every quote, give the timestamp, context, and why it is valuable. Do not add a separate classification field to any quote. Never invent, reconstruct, polish, or silently correct transcript wording. Do not place paraphrases inside quotation marks.{auto_caption_note}]
+
+## Key takeaways
+
+[Using only the Video {rank} transcript in `{transcript_filename}`, write 3 to 7 of the most important actionable lessons. Every takeaway must be supported by the transcript. Explain what each takeaway means, why it matters, who it is useful for, and how to apply it. Keep every takeaway specific to this video.]"""
         )
 
     focus = options.focus.strip()
@@ -111,8 +111,8 @@ The complete structure is expanded below for all {len(videos)} videos. Research 
 ## Non-negotiable rules
 
 1. The first heading in the answer must be `# Video 1 — {videos[0].title}`. Do not place anything before it.
-2. After `## Best quotes` for one video, the next top-level heading must be the next numbered video. Do not insert any other report sections between videos.
-3. Every video must contain exactly these section headings in exactly this order: `## Key takeaways`, `## Best nuggets`, `## Best quotes`.
+2. After `## Key takeaways` for one video, the next top-level heading must be the next numbered video. Do not insert any other report sections between videos.
+3. Every video must contain exactly these section headings in exactly this order: `## Best nuggets`, `## Best quotes`, `## Key takeaways`.
 4. Do not add separate summary, overview, detailed-summary, frameworks, critical-analysis, evidence, or verification sections. Put useful explanatory material inside Key takeaways or Best nuggets.
 5. Use only the timestamped transcript text in `{transcript_filename}` as evidence. External web sources are prohibited.
 6. A transcript is supplied for every listed video. Do not claim that transcripts are unavailable and do not replace transcript evidence with third-party material.
@@ -120,7 +120,7 @@ The complete structure is expanded below for all {len(videos)} videos. Research 
 8. Treat every video independently, even when ideas repeat across videos.
 9. Do not optimize for brevity. Preserve useful details, examples, stories, and applications.
 10. If a single document cannot contain the full result, continue in numbered parts without changing the template or shortening later videos. Resume with the next unfinished video and do not repeat completed videos.
-11. Treat wording from auto-generated captions as potentially imperfect. Preserve it exactly when quoting, show its timestamp, and label it `Auto-generated caption — verify against audio`.
+11. Treat wording from auto-generated captions as potentially imperfect. Preserve it exactly when quoting, show its timestamp, and append `(Auto-generated caption — verify against audio)` after the quotation without adding a separate classification field.
 
 ## Complete video-by-video answer skeleton
 
