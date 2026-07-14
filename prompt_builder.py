@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from transcripts import TranscriptResult
+
 
 @dataclass(frozen=True)
 class PromptOptions:
@@ -27,15 +29,35 @@ def format_duration(total_seconds: int) -> str:
     return f"{minutes}:{seconds:02d}"
 
 
-def build_prompt(videos: list, options: PromptOptions) -> str:
-    """Build a self-contained prompt that asks ChatGPT to inspect every video."""
+def build_prompt(
+    videos: list,
+    options: PromptOptions,
+    transcripts: dict[str, TranscriptResult],
+    transcript_filename: str = "youtube_transcripts.md",
+) -> str:
+    """Build a transcript-only prompt for every selected video."""
 
     if not videos:
         raise ValueError("At least one video is required to build a prompt.")
+    missing = [video.video_id for video in videos if not transcripts.get(video.video_id, None)]
+    unavailable = [
+        video.video_id
+        for video in videos
+        if video.video_id in transcripts and not transcripts[video.video_id].available
+    ]
+    if missing or unavailable:
+        raise ValueError("Every video must have an available transcript before building the prompt.")
 
     video_blocks: list[str] = []
     for rank, video in enumerate(videos, start=1):
         published = video.published_at[:10] if video.published_at else "Unknown"
+        transcript = transcripts[video.video_id]
+        auto_caption_note = (
+            " This source is automatically generated, so mark each quotation as "
+            "`Auto-generated caption — verify against audio`."
+            if transcript.source == "youtube-auto"
+            else ""
+        )
         video_blocks.append(
             f"""# Video {rank} — {video.title}
 
@@ -43,18 +65,20 @@ def build_prompt(videos: list, options: PromptOptions) -> str:
 **Published:** {published}
 **Views at scan time:** {format_views(video.views)}
 **Duration:** {format_duration(video.duration_seconds)}
+**Transcript source:** {transcript.source_label}
+**Transcript language:** {transcript.language or "Unknown"}
 
 ## Key takeaways
 
-[Write all important actionable lessons from Video {rank}. Aim for at least 8 when the source supports them. Explain what each takeaway means, why it matters, who it is useful for, and how to apply it. Keep every takeaway specific to this video.]
+[Using only the Video {rank} transcript in `{transcript_filename}`, write all important actionable lessons. Aim for at least 8 when the transcript supports them. Explain what each takeaway means, why it matters, who it is useful for, and how to apply it. Keep every takeaway specific to this video.]
 
 ## Best nuggets
 
-[Extract the strongest ideas, frameworks, tactics, stories, examples, mental models, and surprising observations from Video {rank}. Aim for at least 10 when the source supports them. Give each nugget a descriptive headline, a substantial explanation, the supporting reasoning or example, why it matters, and a practical use. Include a timestamp or timestamped link when available.]
+[Using only the Video {rank} transcript, extract the strongest ideas, frameworks, tactics, stories, examples, mental models, and surprising observations. Aim for at least 10 when the transcript supports them. Give each nugget a descriptive headline, substantial explanation, supporting reasoning or example, why it matters, and a practical use. Include the transcript timestamp.]
 
 ## Best quotes
 
-[Include the strongest exact transcript-supported quotes from Video {rank}. For every quote, give the speaker, timestamp or timestamped link when available, context, and why it is valuable. Never invent or reconstruct a quote. If no exact transcript-supported quote is accessible, write: **No transcript-verified quotes were available for this video.** Do not put paraphrases inside quotation marks.]"""
+[Quote only exact wording present in the Video {rank} transcript. For every quote, give the timestamp, context, and why it is valuable. Never invent, reconstruct, polish, or silently correct transcript wording. Do not place paraphrases inside quotation marks.{auto_caption_note}]"""
         )
 
     focus = options.focus.strip()
@@ -66,7 +90,11 @@ def build_prompt(videos: list, options: PromptOptions) -> str:
 
     return f"""# Video-by-video YouTube analysis
 
-Analyze all {len(videos)} YouTube videos listed below from **{options.channel_title}** in **{options.report_language}**.
+Analyze all {len(videos)} YouTube videos listed below from **{options.channel_title}** in **{options.report_language}** using the attached file **`{transcript_filename}`**.
+
+The attached transcript pack is the required and exclusive evidence source for video content. It already contains a timestamped YouTube transcript for every listed video. Read the entire transcript section for each video before writing that video's analysis.
+
+Do not search for, cite, or rely on Instagram, TikTok, X, Facebook, blogs, news articles, podcast directories, summaries, or any other external website. Do not infer content from titles, thumbnails, descriptions, or search snippets. You may use the YouTube URLs only as identifiers; all analytical claims and quotations must be supported by the attached transcripts.
 
 Your output must consist only of a repeated video-by-video sequence. Do not write a report introduction, executive synthesis, methodology section, channel-wide analysis, global takeaways, global nuggets, global quotes, verification ledger, conclusion, or appendix.
 
@@ -86,12 +114,13 @@ The complete structure is expanded below for all {len(videos)} videos. Research 
 2. After `## Best quotes` for one video, the next top-level heading must be the next numbered video. Do not insert any other report sections between videos.
 3. Every video must contain exactly these section headings in exactly this order: `## Key takeaways`, `## Best nuggets`, `## Best quotes`.
 4. Do not add separate summary, overview, detailed-summary, frameworks, critical-analysis, evidence, or verification sections. Put useful explanatory material inside Key takeaways or Best nuggets.
-5. Use the actual video transcript/captions as the primary source. Do not infer content from the title alone.
-6. If the transcript is inaccessible, use the best reliable episode-specific sources available, but do not pretend they are the transcript. Mention the limitation briefly inside Best quotes only when it affects quotation verification.
+5. Use only the timestamped transcript text in `{transcript_filename}` as evidence. External web sources are prohibited.
+6. A transcript is supplied for every listed video. Do not claim that transcripts are unavailable and do not replace transcript evidence with third-party material.
 7. Never merge, skip, or reorder videos. The answer must contain exactly {len(videos)} top-level `# Video` headings.
 8. Treat every video independently, even when ideas repeat across videos.
 9. Do not optimize for brevity. Preserve useful details, examples, stories, and applications.
 10. If a single document cannot contain the full result, continue in numbered parts without changing the template or shortening later videos. Resume with the next unfinished video and do not repeat completed videos.
+11. Treat wording from auto-generated captions as potentially imperfect. Preserve it exactly when quoting, show its timestamp, and label it `Auto-generated caption — verify against audio`.
 
 ## Complete video-by-video answer skeleton
 
